@@ -4,9 +4,9 @@ import base64
 import collections
 import json
 import re
+import requests
 import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any, ClassVar, Dict, List, Mapping, Optional, Sequence, Union, cast
 
 import pkg_resources
@@ -108,9 +108,9 @@ class Response:
     data: Any
 
     def __init__(self, response: Any) -> None:
-        self.status_code = response.getcode()
-        self.headers = response.info()
-        self.data = response.read() if (200 == response.status) else None
+        self.status_code = response.status_code
+        self.headers = response.headers
+        self.data = response.text if (200 == response.status_code) else None
 
         if (self.data and (('json' == self.content_type.structure) or ('json-home' == self.content_type.structure))):
             try:
@@ -307,25 +307,21 @@ class Client:
     def _request(self, url: str, method: str = 'GET',
                  payload: bytes = None, content_type: MimeType = None,
                  accept: Sequence[MimeType] = None) -> Response:
+        headers = {}
         """General purpose request."""
-        request = urllib.request.Request(url=url, data=payload, method=method)
         if ((payload is not None) and content_type):
-            request.add_header('Content-Type', str(content_type))
+            headers['Content-Type'] = str(content_type)
         if (accept):
-            request.add_header('Accept', ', '.join([str(mime_type) for mime_type in accept]))
+            headers['Accept'] = ', '.join([str(mime_type) for mime_type in accept])
         if (self.username and self.password):
-            request.add_header('Authorization', 'Basic ' + base64.b64encode((self.username + ':' + self.password).encode('utf-8')).decode('ascii'))
-        request.add_header('User-Agent', self.user_agent)
+            headers['Authorization'] = 'Basic ' + base64.b64encode((self.username + ':' + self.password).encode('utf-8')).decode('ascii')
+        headers['User-Agent'] = self.user_agent
 
         try:
-            with urllib.request.urlopen(request) as response:
+            with requests.request(method, url, data=payload, headers=headers) as response:
                 return Response(response)
-        except urllib.error.HTTPError as error:
-            raise NetworkError(error.reason, error.code)
-        except urllib.error.URLError as error:
-            raise NetworkError(error.reason)
         except Exception as error:
-            raise NetworkError(str(error))
+            raise NetworkError(error.response.text, error.response.status_code)
 
     def _call(self, method: str, name: str, arguments: Mapping[str, Any], payload: bytes = None, content_type: MimeType = None) -> Optional[Response]:
         api_key = urllib.parse.urljoin(self.base_url, name)
